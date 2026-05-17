@@ -29,6 +29,176 @@
 
 bool ENABLE_LOGS = true;
 
+// Granular transmitter log categories. Use `logMask` to enable combinations.
+enum LogCategory : uint8_t
+{
+    LOG_JOYSTICK = 1 << 0,
+    LOG_LASER = 1 << 1,
+    LOG_SEND = 1 << 2,
+    LOG_SYSTEM = 1 << 3,
+    LOG_ALL = 0xFF
+};
+
+uint8_t logMask = 0; // default: disable all logs
+
+void setLogMask(uint8_t mask)
+{
+    logMask = mask;
+}
+
+void enableLog(uint8_t cat)
+{
+    logMask |= cat;
+}
+
+void disableLog(uint8_t cat)
+{
+    logMask &= ~cat;
+}
+
+inline bool isLogEnabled(uint8_t cat)
+{
+    return (logMask & cat) != 0;
+}
+
+uint8_t categoryFromName(const String &name)
+{
+    String s = name;
+    s.toLowerCase();
+
+    if (s == "joystick" || s == "joy")
+        return LOG_JOYSTICK;
+    if (s == "laser")
+        return LOG_LASER;
+    if (s == "send" || s == "tx")
+        return LOG_SEND;
+    if (s == "system" || s == "setup")
+        return LOG_SYSTEM;
+    if (s == "all")
+        return LOG_ALL;
+    if (s == "none")
+        return 0;
+
+    return 0xFF;
+}
+
+void printLogStatus()
+{
+    Serial.println();
+    Serial.print("Log mask: 0x");
+    Serial.println(logMask, HEX);
+    Serial.print(" JOYSTICK: ");
+    Serial.println(isLogEnabled(LOG_JOYSTICK) ? "ON" : "OFF");
+    Serial.print(" LASER: ");
+    Serial.println(isLogEnabled(LOG_LASER) ? "ON" : "OFF");
+    Serial.print(" SEND: ");
+    Serial.println(isLogEnabled(LOG_SEND) ? "ON" : "OFF");
+    Serial.print(" SYSTEM: ");
+    Serial.println(isLogEnabled(LOG_SYSTEM) ? "ON" : "OFF");
+    Serial.println();
+}
+
+void handleLogCommand(String cmdRaw)
+{
+    cmdRaw.trim();
+    if (cmdRaw.length() == 0)
+        return;
+
+    int sp = cmdRaw.indexOf(' ');
+    String verb = (sp == -1) ? cmdRaw : cmdRaw.substring(0, sp);
+    String arg = (sp == -1) ? String("") : cmdRaw.substring(sp + 1);
+    verb.toLowerCase();
+    arg.trim();
+    arg.toLowerCase();
+
+    if (verb == "help")
+    {
+        Serial.println("Log commands:");
+        Serial.println("  show                  - show enabled logs");
+        Serial.println("  set <hex|dec>         - set mask directly (e.g. set 0x0F)");
+        Serial.println("  enable <name>         - enable category (joystick, laser, send, system, all)");
+        Serial.println("  disable <name>        - disable category");
+        Serial.println("  toggle <name>         - toggle category on/off");
+        Serial.println("  help                  - this message");
+        return;
+    }
+
+    if (verb == "show")
+    {
+        printLogStatus();
+        return;
+    }
+
+    if (verb == "set")
+    {
+        if (arg.length() == 0)
+        {
+            Serial.println("set requires a value");
+            return;
+        }
+
+        uint8_t val = 0;
+        if (arg.startsWith("0x"))
+            val = (uint8_t)strtoul(arg.c_str(), nullptr, 16);
+        else
+            val = (uint8_t)strtoul(arg.c_str(), nullptr, 10);
+
+        setLogMask(val);
+        Serial.print("Mask set to 0x");
+        Serial.println(logMask, HEX);
+        return;
+    }
+
+    if (verb == "enable" || verb == "disable" || verb == "toggle")
+    {
+        if (arg.length() == 0)
+        {
+            Serial.println("specify category: joystick, laser, send, system, all");
+            return;
+        }
+
+        uint8_t cat = categoryFromName(arg);
+        if (cat == 0xFF)
+        {
+            Serial.println("unknown category");
+            return;
+        }
+
+        if (verb == "enable")
+        {
+            enableLog(cat);
+            Serial.print("Enabled ");
+            Serial.println(arg);
+        }
+        else if (verb == "disable")
+        {
+            disableLog(cat);
+            Serial.print("Disabled ");
+            Serial.println(arg);
+        }
+        else
+        {
+            if (isLogEnabled(cat))
+            {
+                disableLog(cat);
+                Serial.print("Toggled OFF ");
+                Serial.println(arg);
+            }
+            else
+            {
+                enableLog(cat);
+                Serial.print("Toggled ON ");
+                Serial.println(arg);
+            }
+        }
+
+        printLogStatus();
+        return;
+    }
+
+    Serial.println("unknown command; type 'help' for usage");
+}
+
 //////////////////////////////////////////////////////////
 // PINS
 //////////////////////////////////////////////////////////
@@ -36,6 +206,11 @@ bool ENABLE_LOGS = true;
 // JOYSTICK
 const int JOY_X = 35;
 const int JOY_Y = 34;
+
+// Raw joystick calibration. Adjust these to match the physical center.
+int JOY_X_CENTER_RAW = 2048;
+int JOY_Y_CENTER_RAW = 2048;
+int JOY_DEADZONE_RAW = 100;
 
 // LASER BUTTON (direct control)
 const int LASER_BUTTON = 18;
@@ -66,7 +241,9 @@ struct_message outgoingData;
 //////////////////////////////////////////////////////////
 
 void logMsg(String msg);
+void logCategory(uint8_t cat, const String &msg);
 void IRAM_ATTR onLaserButtonEdge();
+int mapAxisWithDeadzone(int rawValue, int centerValue, int deadzoneValue);
 
 //////////////////////////////////////////////////////////
 // BROADCAST PEER
@@ -96,7 +273,7 @@ public:
         if (!ESP_NOW.begin() || !add())
         {
 
-            logMsg("[ERROR] Failed to initialize ESP-NOW or register broadcast peer");
+            logCategory(LOG_SYSTEM, "[ERROR] Failed to initialize ESP-NOW or register broadcast peer");
             return false;
         }
 
@@ -109,7 +286,7 @@ public:
         if (!send(data, len))
         {
 
-            logMsg("[ERROR] Failed to broadcast message");
+            logCategory(LOG_SEND, "[ERROR] Failed to broadcast message");
             return false;
         }
 
@@ -140,10 +317,41 @@ void logMsg(String msg)
     }
 }
 
+void logCategory(uint8_t cat, const String &msg)
+{
+
+    if (ENABLE_LOGS && isLogEnabled(cat))
+    {
+
+        Serial.println(msg);
+    }
+}
+
 void IRAM_ATTR onLaserButtonEdge()
 {
 
     laserButtonEdgeDetected = true;
+}
+
+int mapAxisWithDeadzone(int rawValue, int centerValue, int deadzoneValue)
+{
+
+    int lowerBound = centerValue - deadzoneValue;
+    int upperBound = centerValue + deadzoneValue;
+
+    if (rawValue >= lowerBound && rawValue <= upperBound)
+    {
+
+        return 0;
+    }
+
+    if (rawValue < lowerBound)
+    {
+
+        return map(rawValue, 0, lowerBound, 255, 0);
+    }
+
+    return map(rawValue, upperBound, 4095, 0, -255);
 }
 
 //////////////////////////////////////////////////////////
@@ -155,10 +363,10 @@ void setup()
 
     Serial.begin(115200);
 
-    logMsg("");
-    logMsg("=================================");
-    logMsg("ESP32 TRANSMITTER STARTING");
-    logMsg("=================================");
+    logCategory(LOG_SYSTEM, "");
+    logCategory(LOG_SYSTEM, "=================================");
+    logCategory(LOG_SYSTEM, "ESP32 TRANSMITTER STARTING");
+    logCategory(LOG_SYSTEM, "=================================");
 
     ////////////////////////////////////////////////////////
     // INPUTS
@@ -172,7 +380,7 @@ void setup()
                     onLaserButtonEdge,
                     CHANGE);
 
-    logMsg("[OK] Inputs Initialized");
+    logCategory(LOG_SYSTEM, "[OK] Inputs Initialized");
 
     ////////////////////////////////////////////////////////
     // WIFI
@@ -187,7 +395,7 @@ void setup()
         delay(100);
     }
 
-    logMsg("[OK] WiFi STA Mode Started");
+    logCategory(LOG_SYSTEM, "[OK] WiFi STA Mode Started");
 
     Serial.print("[MAC] ");
     Serial.println(WiFi.macAddress());
@@ -196,22 +404,24 @@ void setup()
     // ESPNOW
     ////////////////////////////////////////////////////////
 
-    logMsg("[INIT] Initializing ESP-NOW broadcast peer...");
+    logCategory(LOG_SYSTEM, "[INIT] Initializing ESP-NOW broadcast peer...");
 
     if (!broadcast_peer.begin())
     {
 
-        logMsg("[ERROR] Broadcast peer setup failed");
+        logCategory(LOG_SYSTEM, "[ERROR] Broadcast peer setup failed");
 
         while (true)
             ;
     }
 
-    logMsg("[OK] Broadcast Peer Ready");
+    logCategory(LOG_SYSTEM, "[OK] Broadcast Peer Ready");
 
-    logMsg("=================================");
-    logMsg("TRANSMITTER READY");
-    logMsg("=================================");
+    logCategory(LOG_SYSTEM, "=================================");
+    logCategory(LOG_SYSTEM, "TRANSMITTER READY");
+    logCategory(LOG_SYSTEM, "=================================");
+
+    Serial.println("Transmitter logging control available. Type 'help' for commands.");
 }
 
 //////////////////////////////////////////////////////////
@@ -220,6 +430,14 @@ void setup()
 
 void loop()
 {
+
+    if (Serial.available())
+    {
+        String cmd = Serial.readStringUntil('\n');
+        cmd.trim();
+        if (cmd.length() > 0)
+            handleLogCommand(cmd);
+    }
 
     static unsigned long lastDebounceTime = 0;
     static unsigned long lastSendTime = 0;
@@ -234,26 +452,26 @@ void loop()
     int rawY = analogRead(JOY_Y);
 
     ////////////////////////////////////////////////////////
-    // MAP VALUES
+    // MAP VALUES WITH RAW DEADZONE
     ////////////////////////////////////////////////////////
 
-    int mappedX = map(rawX, 0, 4095, 255, -255);
-    int mappedY = map(rawY, 0, 4095, -255, 255);
+    int mappedX = mapAxisWithDeadzone(rawX, JOY_X_CENTER_RAW, JOY_DEADZONE_RAW);
+    int mappedY = mapAxisWithDeadzone(rawY, JOY_Y_CENTER_RAW, JOY_DEADZONE_RAW);
 
-    ////////////////////////////////////////////////////////
-    // DEADZONE
-    ////////////////////////////////////////////////////////
-
-    if (abs(mappedX) < 100)
-        mappedX = 0;
-    if (abs(mappedY) < 100)
-        mappedY = 0;
-
-    ////////////////////////////////////////////////////////
-    // INVERT Y AXIS
-    ////////////////////////////////////////////////////////
-
-    mappedY = -mappedY;
+    if (ENABLE_LOGS && isLogEnabled(LOG_JOYSTICK))
+    {
+        Serial.println();
+        Serial.println("=========== JOYSTICK READINGS ===========");
+        Serial.print("RAW X: ");
+        Serial.println(rawX);
+        Serial.print("RAW Y: ");
+        Serial.println(rawY);
+        Serial.print("MAPPED X: ");
+        Serial.println(mappedX);
+        Serial.print("MAPPED Y: ");
+        Serial.println(mappedY);
+        Serial.println("=========================================");
+    }
 
     ////////////////////////////////////////////////////////
     // LASER BUTTON TOGGLE
@@ -290,7 +508,7 @@ void loop()
                 digitalWrite(LASER_LED, laserState ? HIGH : LOW);
 
                 // Log only on change
-                if (ENABLE_LOGS)
+                if (ENABLE_LOGS && isLogEnabled(LOG_LASER))
                 {
                     if (laserState)
                         logMsg("[LASER] ON");
@@ -336,61 +554,20 @@ void loop()
             (uint8_t *)&outgoingData,
             sizeof(outgoingData));
         lastSendTime = millis();
-    }
 
-    ////////////////////////////////////////////////////////
-    // FULL DEBUG LOGGING
-    ////////////////////////////////////////////////////////
-
-    if (ENABLE_LOGS && shouldSend)
-    {
-
-        Serial.println();
-        Serial.println("========== TRANSMITTER DEBUG ==========");
-
-        Serial.print("RAW X: ");
-        Serial.println(rawX);
-
-        Serial.print("RAW Y: ");
-        Serial.println(rawY);
-
-        Serial.print("MAPPED X: ");
-        Serial.println(mappedX);
-
-        Serial.print("MAPPED Y: ");
-        Serial.println(mappedY);
-
-        Serial.print("LEFT SPEED: ");
-        Serial.println(leftSpeed);
-
-        Serial.print("RIGHT SPEED: ");
-        Serial.println(rightSpeed);
-
-        Serial.print("LASER: ");
-
-        if (laserState)
+        if (ENABLE_LOGS && isLogEnabled(LOG_SEND))
         {
-
-            Serial.println("ON");
+            Serial.println();
+            Serial.println("========== TX SEND ==========");
+            Serial.print("LEFT SPEED: ");
+            Serial.println(leftSpeed);
+            Serial.print("RIGHT SPEED: ");
+            Serial.println(rightSpeed);
+            Serial.print("LASER: ");
+            Serial.println(laserState ? "ON" : "OFF");
+            Serial.println(sendOk ? "[ESP NOW] Broadcast Packet Queued" : "[ERROR] Broadcast Send Failed");
+            Serial.println("=============================");
         }
-        else
-        {
-
-            Serial.println("OFF");
-        }
-
-        if (sendOk)
-        {
-
-            Serial.println("[ESP NOW] Broadcast Packet Queued");
-        }
-        else
-        {
-
-            Serial.println("[ERROR] Broadcast Send Failed");
-        }
-
-        Serial.println("=======================================");
     }
 
     delay(5);

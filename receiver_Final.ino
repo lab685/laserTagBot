@@ -33,6 +33,185 @@
 
 bool ENABLE_LOGS = true;
 
+// Granular log categories. Use `logMask` to enable combinations.
+// Example: enable LDR + PACKET => setLogMask(LOG_LDR | LOG_PACKET);
+enum LogCategory : uint8_t
+{
+    LOG_LDR = 1 << 0,
+    LOG_PACKET = 1 << 1,       // received joystick/packet values
+    LOG_MOTOR = 1 << 2,        // motor state changes (stop/start)
+    LOG_SERVO = 1 << 3,        // servo actions/recovery
+    LOG_MOTOR_OUTPUT = 1 << 4, // numeric motor outputs (left/right PWM)
+    LOG_ALL = 0xFF
+};
+
+uint8_t logMask = 0; // default: disable all logs
+
+void setLogMask(uint8_t mask)
+{
+    logMask = mask;
+}
+
+void enableLog(uint8_t cat)
+{
+    logMask |= cat;
+}
+
+void disableLog(uint8_t cat)
+{
+    logMask &= ~cat;
+}
+
+inline bool isLogEnabled(uint8_t cat)
+{
+    return (logMask & cat) != 0;
+}
+
+// Map string names to categories. Accepts: ldr, packet, motor, servo, motorout, all, none
+uint8_t categoryFromName(const String &name)
+{
+    String s = name;
+    s.toLowerCase();
+
+    if (s == "ldr")
+        return LOG_LDR;
+    if (s == "packet" || s == "joystick" || s == "rx")
+        return LOG_PACKET;
+    if (s == "motor")
+        return LOG_MOTOR;
+    if (s == "servo")
+        return LOG_SERVO;
+    if (s == "motorout" || s == "motor_output" || s == "output")
+        return LOG_MOTOR_OUTPUT;
+    if (s == "all")
+        return LOG_ALL;
+    if (s == "none")
+        return 0;
+
+    return 0xFF; // invalid
+}
+
+void printLogStatus()
+{
+    Serial.println();
+    Serial.print("Log mask: 0x");
+    Serial.println(logMask, HEX);
+    Serial.print(" LDR: ");
+    Serial.println(isLogEnabled(LOG_LDR) ? "ON" : "OFF");
+    Serial.print(" PACKET: ");
+    Serial.println(isLogEnabled(LOG_PACKET) ? "ON" : "OFF");
+    Serial.print(" MOTOR: ");
+    Serial.println(isLogEnabled(LOG_MOTOR) ? "ON" : "OFF");
+    Serial.print(" SERVO: ");
+    Serial.println(isLogEnabled(LOG_SERVO) ? "ON" : "OFF");
+    Serial.print(" MOTOR_OUTPUT: ");
+    Serial.println(isLogEnabled(LOG_MOTOR_OUTPUT) ? "ON" : "OFF");
+    Serial.println();
+}
+
+void handleLogCommand(const String &cmdRaw)
+{
+    String cmd = cmdRaw;
+    cmd.trim();
+    if (cmd.length() == 0)
+        return;
+
+    // split first token
+    int sp = cmd.indexOf(' ');
+    String verb = (sp == -1) ? cmd : cmd.substring(0, sp);
+    String arg = (sp == -1) ? String("") : cmd.substring(sp + 1);
+    verb.toLowerCase();
+    arg.trim();
+    arg.toLowerCase();
+
+    if (verb == "help")
+    {
+        Serial.println("Log commands:");
+        Serial.println("  show                  - show enabled logs");
+        Serial.println("  set <hex|dec>         - set mask directly (e.g. set 0x1F)");
+        Serial.println("  enable <name>         - enable a category (ldr, packet, motor, servo, motorout, all)");
+        Serial.println("  disable <name>        - disable a category");
+        Serial.println("  toggle <name>         - toggle a category");
+        Serial.println("  help                  - this message");
+        return;
+    }
+
+    if (verb == "show")
+    {
+        printLogStatus();
+        return;
+    }
+
+    if (verb == "set")
+    {
+        if (arg.length() == 0)
+        {
+            Serial.println("set requires a value");
+            return;
+        }
+
+        uint8_t val = 0;
+        if (arg.startsWith("0x"))
+            val = (uint8_t)strtoul(arg.c_str(), nullptr, 16);
+        else
+            val = (uint8_t)strtoul(arg.c_str(), nullptr, 10);
+
+        setLogMask(val);
+        Serial.print("Mask set to 0x");
+        Serial.println(logMask, HEX);
+        return;
+    }
+
+    if (verb == "enable" || verb == "disable" || verb == "toggle")
+    {
+        if (arg.length() == 0)
+        {
+            Serial.println("specify category: ldr, packet, motor, servo, motorout, all");
+            return;
+        }
+
+        uint8_t cat = categoryFromName(arg);
+        if (cat == 0xFF)
+        {
+            Serial.println("unknown category");
+            return;
+        }
+
+        if (verb == "enable")
+        {
+            enableLog(cat);
+            Serial.print("Enabled ");
+            Serial.println(arg);
+        }
+        else if (verb == "disable")
+        {
+            disableLog(cat);
+            Serial.print("Disabled ");
+            Serial.println(arg);
+        }
+        else
+        {
+            if (isLogEnabled(cat))
+            {
+                disableLog(cat);
+                Serial.print("Toggled OFF ");
+                Serial.println(arg);
+            }
+            else
+            {
+                enableLog(cat);
+                Serial.print("Toggled ON ");
+                Serial.println(arg);
+            }
+        }
+
+        printLogStatus();
+        return;
+    }
+
+    Serial.println("unknown command; type 'help' for usage");
+}
+
 ////////////////////////////////////////////////////////////
 // MOTOR PINS
 ////////////////////////////////////////////////////////////
@@ -56,7 +235,7 @@ const int LASER_PIN = 14;
 // IMPORTANT:
 // GPIO 34 DOES NOT WORK FOR SERVO (INPUT ONLY)
 // USE GPIO 27 INSTEAD
-const int SERVO_PIN = 27;
+const int SERVO_PIN = 13;
 
 // LDR SENSORS
 const int LDR_LEFT = 32;
@@ -88,6 +267,11 @@ unsigned long lastPacketTime = 0;
 bool hitDetected = false;
 
 unsigned long hitClearSince = 0;
+
+// Track whether motors are currently active (moving). Used to avoid
+// logging a STOP action immediately when a transmitter connects while
+// joysticks are centered.
+bool motorsActive = false;
 
 ////////////////////////////////////////////////////////////
 // SERVO
@@ -237,6 +421,9 @@ void setup()
     logMsg("ESP32 RECEIVER STARTING");
     logMsg("=======================================");
 
+    // Print minimal runtime log control help
+    Serial.println("Receiver logging control available. Type 'help' for commands.");
+
     //////////////////////////////////////////////////////////
     // MOTOR PINS
     //////////////////////////////////////////////////////////
@@ -282,6 +469,10 @@ void setup()
     myServo.write(0);
 
     logMsg("[SERVO] Initialized at 0 degree");
+    if (ENABLE_LOGS && isLogEnabled(LOG_SERVO))
+    {
+        Serial.println("[SERVO] Initialized at 0 degree");
+    }
 
     //////////////////////////////////////////////////////////
     // STOP MOTORS
@@ -339,6 +530,15 @@ void setup()
 void loop()
 {
 
+    // Handle serial log control commands first (non-blocking)
+    if (Serial.available())
+    {
+        String cmd = Serial.readStringUntil('\n');
+        cmd.trim();
+        if (cmd.length() > 0)
+            handleLogCommand(cmd);
+    }
+
     //////////////////////////////////////////////////////////
     // CONNECTION TIMEOUT
     //////////////////////////////////////////////////////////
@@ -380,12 +580,18 @@ void loop()
 
             hitDetected = true;
 
-            logMsg("");
-            logMsg("=======================================");
-            logMsg("[HIT DETECTED]");
-            logMsg("[ACTION] STOPPING MOTORS");
-            logMsg("[ACTION] MOVING SERVO TO 90");
-            logMsg("=======================================");
+            if (ENABLE_LOGS && (isLogEnabled(LOG_MOTOR) || isLogEnabled(LOG_SERVO)))
+            {
+                Serial.println();
+                Serial.println("=======================================");
+                if (isLogEnabled(LOG_MOTOR))
+                    Serial.println("[HIT DETECTED]");
+                if (isLogEnabled(LOG_MOTOR))
+                    Serial.println("[ACTION] STOPPING MOTORS");
+                if (isLogEnabled(LOG_SERVO))
+                    Serial.println("[ACTION] MOVING SERVO TO 90");
+                Serial.println("=======================================");
+            }
         }
 
         hitClearSince = 0;
@@ -394,6 +600,10 @@ void loop()
         stopMotors();
         digitalWrite(LASER_PIN, LOW);
         myServo.write(90);
+        if (ENABLE_LOGS && isLogEnabled(LOG_SERVO))
+        {
+            Serial.println("[SERVO] moved to 90 due to LDR trigger");
+        }
     }
     else if (hitDetected)
     {
@@ -413,7 +623,10 @@ void loop()
 
             logMsg("");
             logMsg("=======================================");
-            logMsg("[RECOVERED] HIT MODE CLEARED");
+            if (ENABLE_LOGS && isLogEnabled(LOG_SERVO))
+            {
+                Serial.println("[RECOVERED] HIT MODE CLEARED");
+            }
             logMsg("=======================================");
         }
     }
@@ -427,7 +640,7 @@ void loop()
 
         lastLDRLog = millis();
 
-        if (ENABLE_LOGS)
+        if (ENABLE_LOGS && isLogEnabled(LOG_LDR))
         {
 
             Serial.println();
@@ -489,6 +702,11 @@ void handleIncomingPacket(const uint8_t *incomingDataBytes,
            incomingDataBytes,
            sizeof(incomingData));
 
+    static struct_message lastLoggedIncomingData = {0, 0, false};
+    bool packetChanged = (incomingData.x != lastLoggedIncomingData.x ||
+                          incomingData.y != lastLoggedIncomingData.y ||
+                          incomingData.laserOn != lastLoggedIncomingData.laserOn);
+
     //////////////////////////////////////////////////////////
     // IGNORE CONTROLS IF HIT DETECTED
     //////////////////////////////////////////////////////////
@@ -502,7 +720,7 @@ void handleIncomingPacket(const uint8_t *incomingDataBytes,
     // LOG RECEIVED DATA
     //////////////////////////////////////////////////////////
 
-    if (ENABLE_LOGS)
+    if (ENABLE_LOGS && packetChanged && isLogEnabled(LOG_PACKET))
     {
 
         Serial.println();
@@ -518,6 +736,8 @@ void handleIncomingPacket(const uint8_t *incomingDataBytes,
         Serial.println(incomingData.laserOn ? "ON" : "OFF");
 
         Serial.println("======================================");
+
+        lastLoggedIncomingData = incomingData;
     }
 
     //////////////////////////////////////////////////////////
@@ -536,14 +756,22 @@ void handleIncomingPacket(const uint8_t *incomingDataBytes,
     if (leftSpeed == 0 && rightSpeed == 0)
     {
 
-        stopMotors();
-        logMsg("[ACTION] STOP");
+        if (motorsActive)
+        {
+            stopMotors();
+
+            if (ENABLE_LOGS && isLogEnabled(LOG_MOTOR))
+            {
+                Serial.println("[ACTION] STOP");
+            }
+        }
+
         return;
     }
 
     applyMotorSpeeds(leftSpeed, rightSpeed);
 
-    if (ENABLE_LOGS)
+    if (ENABLE_LOGS && packetChanged && isLogEnabled(LOG_MOTOR_OUTPUT))
     {
 
         Serial.print("LEFT SPEED: ");
@@ -630,7 +858,11 @@ void stopMotors()
     ledcWrite(LEFT_PWM, 0);
     ledcWrite(RIGHT_PWM, 0);
 
-    logMsg("[MOTOR] STOPPED");
+    motorsActive = false;
+    if (ENABLE_LOGS && isLogEnabled(LOG_MOTOR))
+    {
+        Serial.println("[MOTOR] STOPPED");
+    }
 }
 
 ////////////////////////////////////////////////////////////
@@ -642,6 +874,9 @@ void applyMotorSpeeds(int leftSpeed, int rightSpeed)
 
     leftSpeed = scaleSpeedToMax(leftSpeed);
     rightSpeed = scaleSpeedToMax(rightSpeed);
+
+    // Mark motors as active since we're about to drive them
+    motorsActive = true;
 
     if (leftSpeed > 0)
     {
