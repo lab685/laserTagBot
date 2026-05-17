@@ -21,7 +21,7 @@
 #include "ESP32_NOW.h"
 #include "WiFi.h"
 
-#define ESPNOW_WIFI_CHANNEL 2
+#define ESPNOW_WIFI_CHANNEL 4
 
 //////////////////////////////////////////////////////////
 // ENABLE / DISABLE LOGS
@@ -220,6 +220,8 @@ const int LASER_LED = 16;
 
 const unsigned long SEND_INTERVAL_MS = 20;
 const unsigned long LASER_DEBOUNCE_MS = 20;
+const int JOY_CALIBRATION_SAMPLES = 120;
+const unsigned long JOY_CALIBRATION_DELAY_MS = 5;
 
 //////////////////////////////////////////////////////////
 // STRUCT
@@ -244,6 +246,8 @@ void logMsg(String msg);
 void logCategory(uint8_t cat, const String &msg);
 void IRAM_ATTR onLaserButtonEdge();
 int mapAxisWithDeadzone(int rawValue, int centerValue, int deadzoneValue);
+void calibrateJoystickCenter();
+void blinkCalibrationPattern();
 
 //////////////////////////////////////////////////////////
 // BROADCAST PEER
@@ -301,7 +305,8 @@ ESP_NOW_Broadcast_Peer broadcast_peer(ESPNOW_WIFI_CHANNEL, WIFI_IF_STA, nullptr)
 //////////////////////////////////////////////////////////
 
 bool laserState = false;
-volatile bool laserButtonEdgeDetected = false;
+volatile bool laserButtonPressEdgeDetected = false;
+volatile bool laserButtonReleaseEdgeDetected = false;
 
 //////////////////////////////////////////////////////////
 // LOG FUNCTION
@@ -330,7 +335,14 @@ void logCategory(uint8_t cat, const String &msg)
 void IRAM_ATTR onLaserButtonEdge()
 {
 
-    laserButtonEdgeDetected = true;
+    if (digitalRead(LASER_BUTTON) == HIGH)
+    {
+        laserButtonPressEdgeDetected = true;
+    }
+    else
+    {
+        laserButtonReleaseEdgeDetected = true;
+    }
 }
 
 int mapAxisWithDeadzone(int rawValue, int centerValue, int deadzoneValue)
@@ -352,6 +364,45 @@ int mapAxisWithDeadzone(int rawValue, int centerValue, int deadzoneValue)
     }
 
     return map(rawValue, upperBound, 4095, 0, -255);
+}
+
+void blinkCalibrationPattern()
+{
+    for (int i = 0; i < 3; i++)
+    {
+        digitalWrite(LASER_LED, HIGH);
+        delay(120);
+        digitalWrite(LASER_LED, LOW);
+        delay(120);
+    }
+}
+
+void calibrateJoystickCenter()
+{
+    long sumX = 0;
+    long sumY = 0;
+
+    logCategory(LOG_SYSTEM, "[JOY] Calibrating joystick center...");
+
+    for (int i = 0; i < JOY_CALIBRATION_SAMPLES; i++)
+    {
+        sumX += analogRead(JOY_X);
+        sumY += analogRead(JOY_Y);
+        delay(JOY_CALIBRATION_DELAY_MS);
+    }
+
+    JOY_X_CENTER_RAW = (int)(sumX / JOY_CALIBRATION_SAMPLES);
+    JOY_Y_CENTER_RAW = (int)(sumY / JOY_CALIBRATION_SAMPLES);
+
+    if (ENABLE_LOGS)
+    {
+        Serial.print("[JOY] Center X: ");
+        Serial.println(JOY_X_CENTER_RAW);
+        Serial.print("[JOY] Center Y: ");
+        Serial.println(JOY_Y_CENTER_RAW);
+    }
+
+    blinkCalibrationPattern();
 }
 
 //////////////////////////////////////////////////////////
@@ -376,6 +427,9 @@ void setup()
     pinMode(LASER_BUTTON, INPUT_PULLDOWN);
     pinMode(LASER_LED, OUTPUT);
     digitalWrite(LASER_LED, LOW);
+
+    calibrateJoystickCenter();
+
     attachInterrupt(digitalPinToInterrupt(LASER_BUTTON),
                     onLaserButtonEdge,
                     CHANGE);
@@ -464,7 +518,7 @@ void loop()
         Serial.println("=========== JOYSTICK READINGS ===========");
         Serial.print("RAW X: ");
         Serial.println(rawX);
-        Serial.print("RAW Y: ");2
+        Serial.print("RAW Y: ");
         Serial.println(rawY);
         Serial.print("MAPPED X: ");
         Serial.println(mappedX);
@@ -479,9 +533,10 @@ void loop()
 
     bool edgeDetected = false;
     noInterrupts();
-    if (laserButtonEdgeDetected)
+    if (laserButtonPressEdgeDetected || laserButtonReleaseEdgeDetected)
     {
-        laserButtonEdgeDetected = false;
+        laserButtonPressEdgeDetected = false;
+        laserButtonReleaseEdgeDetected = false;
         edgeDetected = true;
     }
     interrupts();

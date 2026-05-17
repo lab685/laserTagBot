@@ -28,6 +28,8 @@ Commands (send via serial, end with newline)
 - `servo <0-180>` : move receiver servo directly for testing
 - `servo sweep` : run servo sweep test (0 to 180 to 0)
 - `servohold on|off` : keep manual servo position or return to auto LDR control
+- `laser on|off|toggle` : force receiver laser for testing
+- `laser auto` : return laser control to transmitter
 
 Examples
 
@@ -44,6 +46,10 @@ Examples
   - `servo sweep`
 - Resume automatic LDR-based servo control:
   - `servohold off`
+- Force laser on for testing:
+  - `laser on`
+- Return laser control to transmitter:
+  - `laser auto`
 
 Notes
 

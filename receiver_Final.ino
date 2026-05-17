@@ -25,7 +25,7 @@
 
 #include <vector>
 
-#define ESPNOW_WIFI_CHANNEL 2
+#define ESPNOW_WIFI_CHANNEL 4
 
 ////////////////////////////////////////////////////////////
 // ENABLE/DISABLE LOGGING
@@ -50,6 +50,9 @@ uint8_t logMask = 0; // default: disable all logs
 // Forward declaration so serial command handler can move servo for testing.
 extern Servo myServo;
 extern bool servoManualHold;
+extern bool laserManualOverride;
+extern bool laserManualState;
+extern const int LASER_PIN;
 
 void setLogMask(uint8_t mask)
 {
@@ -139,6 +142,8 @@ void handleLogCommand(const String &cmdRaw)
         Serial.println("  servo <0-180>         - move servo directly for testing");
         Serial.println("  servo sweep           - run servo sweep test 0->180->0");
         Serial.println("  servohold on|off      - keep manual servo position / return to auto");
+        Serial.println("  laser on|off|toggle   - force receiver laser for testing");
+        Serial.println("  laser auto            - return laser control to transmitter");
         Serial.println("  help                  - this message");
         return;
     }
@@ -163,6 +168,39 @@ void handleLogCommand(const String &cmdRaw)
         return;
     }
 
+    if (verb == "laser")
+    {
+        if (arg == "auto")
+        {
+            laserManualOverride = false;
+            Serial.println("[LASER TEST] auto mode ON (transmitter controls laser)");
+            return;
+        }
+
+        if (arg == "on" || arg == "off" || arg == "toggle")
+        {
+            laserManualOverride = true;
+
+            if (arg == "toggle")
+            {
+                laserManualState = !laserManualState;
+            }
+            else
+            {
+                laserManualState = (arg == "on");
+            }
+
+            digitalWrite(LASER_PIN, laserManualState ? HIGH : LOW);
+
+            Serial.print("[LASER TEST] forced ");
+            Serial.println(laserManualState ? "ON" : "OFF");
+            return;
+        }
+
+        Serial.println("usage: laser on|off|toggle|auto");
+        return;
+    }
+
     if (verb == "servo")
     {
         if (arg.length() == 0)
@@ -178,13 +216,13 @@ void handleLogCommand(const String &cmdRaw)
             for (int pos = 0; pos <= 180; pos += 5)
             {
                 myServo.write(pos);
-              //  delay(15);
+                //  delay(15);
             }
 
             for (int pos = 180; pos >= 0; pos -= 5)
             {
                 myServo.write(pos);
-              //  delay(15);
+                //  delay(15);
             }
 
             Serial.println("[SERVO TEST] sweep complete (hold remains ON)");
@@ -345,6 +383,8 @@ bool hitDetected = false;
 unsigned long hitClearSince = 0;
 
 bool servoManualHold = false;
+bool laserManualOverride = false;
+bool laserManualState = false;
 
 // Track whether motors are currently active (moving). Used to avoid
 // logging a STOP action immediately when a transmitter connects while
@@ -528,16 +568,12 @@ void setup()
     pinMode(LDR_LEFT, INPUT);
     pinMode(LDR_RIGHT, INPUT);
 
-    
-
     //////////////////////////////////////////////////////////
     // PWM
     //////////////////////////////////////////////////////////
 
     ledcAttach(LEFT_PWM, PWM_FREQ, PWM_RESOLUTION);
     ledcAttach(RIGHT_PWM, PWM_FREQ, PWM_RESOLUTION);
-
-   
 
     logMsg("[SERVO] Initialized at 0 degree");
     if (ENABLE_LOGS && isLogEnabled(LOG_SERVO))
@@ -628,7 +664,10 @@ void loop()
 
         stopMotors();
 
-        digitalWrite(LASER_PIN, LOW);
+        if (!laserManualOverride)
+        {
+            digitalWrite(LASER_PIN, LOW);
+        }
     }
 
     //////////////////////////////////////////////////////////
@@ -668,7 +707,10 @@ void loop()
 
         // Enforce hit mode continuously while LDR stays above threshold.
         stopMotors();
-        digitalWrite(LASER_PIN, LOW);
+        if (!laserManualOverride)
+        {
+            digitalWrite(LASER_PIN, LOW);
+        }
         if (!servoManualHold)
         {
             myServo.write(90);
@@ -730,7 +772,7 @@ void loop()
         }
     }
 
-   //delay(10);
+    // delay(10);
 }
 
 ////////////////////////////////////////////////////////////
@@ -818,7 +860,14 @@ void handleIncomingPacket(const uint8_t *incomingDataBytes,
     // LASER CONTROL
     //////////////////////////////////////////////////////////
 
-    digitalWrite(LASER_PIN, incomingData.laserOn);
+    if (!laserManualOverride)
+    {
+        digitalWrite(LASER_PIN, incomingData.laserOn);
+    }
+    else
+    {
+        digitalWrite(LASER_PIN, laserManualState ? HIGH : LOW);
+    }
 
     //////////////////////////////////////////////////////////
     // MOTOR SPEEDS ARE PRE-MIXED BY TRANSMITTER
