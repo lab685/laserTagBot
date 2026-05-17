@@ -43,6 +43,9 @@ const int LASER_BUTTON = 18;
 // LED that mirrors laser state
 const int LASER_LED = 16;
 
+const unsigned long SEND_INTERVAL_MS = 20;
+const unsigned long LASER_DEBOUNCE_MS = 20;
+
 //////////////////////////////////////////////////////////
 // STRUCT
 //////////////////////////////////////////////////////////
@@ -63,6 +66,7 @@ struct_message outgoingData;
 //////////////////////////////////////////////////////////
 
 void logMsg(String msg);
+void IRAM_ATTR onLaserButtonEdge();
 
 //////////////////////////////////////////////////////////
 // BROADCAST PEER
@@ -120,7 +124,7 @@ ESP_NOW_Broadcast_Peer broadcast_peer(ESPNOW_WIFI_CHANNEL, WIFI_IF_STA, nullptr)
 //////////////////////////////////////////////////////////
 
 bool laserState = false;
-bool lastButtonState = HIGH;
+volatile bool laserButtonEdgeDetected = false;
 
 //////////////////////////////////////////////////////////
 // LOG FUNCTION
@@ -134,6 +138,12 @@ void logMsg(String msg)
 
         Serial.println(msg);
     }
+}
+
+void IRAM_ATTR onLaserButtonEdge()
+{
+
+    laserButtonEdgeDetected = true;
 }
 
 //////////////////////////////////////////////////////////
@@ -158,6 +168,9 @@ void setup()
     pinMode(LASER_BUTTON, INPUT_PULLDOWN);
     pinMode(LASER_LED, OUTPUT);
     digitalWrite(LASER_LED, LOW);
+    attachInterrupt(digitalPinToInterrupt(LASER_BUTTON),
+                    onLaserButtonEdge,
+                    CHANGE);
 
     logMsg("[OK] Inputs Initialized");
 
@@ -208,6 +221,11 @@ void setup()
 void loop()
 {
 
+    static unsigned long lastDebounceTime = 0;
+    static unsigned long lastSendTime = 0;
+
+    bool forceImmediateSend = false;
+
     ////////////////////////////////////////////////////////
     // READ JOYSTICK
     ////////////////////////////////////////////////////////
@@ -241,43 +259,47 @@ void loop()
     // LASER BUTTON TOGGLE
     ////////////////////////////////////////////////////////
 
-    // Debounced read of laser button so LED doesn't stick or mis-read
-    static bool prevLaserState = false;
-    static int lastButtonRead = LOW;
-    static unsigned long lastDebounceTime = 0;
-    const unsigned long debounceDelay = 50;
-
-    int reading = digitalRead(LASER_BUTTON);
-
-    if (reading != lastButtonRead)
+    bool edgeDetected = false;
+    noInterrupts();
+    if (laserButtonEdgeDetected)
     {
-        lastDebounceTime = millis();
+        laserButtonEdgeDetected = false;
+        edgeDetected = true;
     }
+    interrupts();
 
-    if ((unsigned long)(millis() - lastDebounceTime) > debounceDelay)
+    if (edgeDetected)
     {
-        bool newState = (reading == HIGH);
 
-        if (newState != prevLaserState)
+        unsigned long now = millis();
+
+        if ((unsigned long)(now - lastDebounceTime) >= LASER_DEBOUNCE_MS)
         {
-            prevLaserState = newState;
-            laserState = newState;
 
-            // Mirror to local LED
-            digitalWrite(LASER_LED, laserState ? HIGH : LOW);
+            lastDebounceTime = now;
 
-            // Log only on change
-            if (ENABLE_LOGS)
+            bool newState = (digitalRead(LASER_BUTTON) == HIGH);
+
+            if (newState != laserState)
             {
-                if (laserState)
-                    logMsg("[LASER] ON");
-                else
-                    logMsg("[LASER] OFF");
+
+                laserState = newState;
+                forceImmediateSend = true;
+
+                // Mirror to local LED
+                digitalWrite(LASER_LED, laserState ? HIGH : LOW);
+
+                // Log only on change
+                if (ENABLE_LOGS)
+                {
+                    if (laserState)
+                        logMsg("[LASER] ON");
+                    else
+                        logMsg("[LASER] OFF");
+                }
             }
         }
     }
-
-    lastButtonRead = reading;
 
     ////////////////////////////////////////////////////////
     // FILL STRUCT
@@ -303,15 +325,24 @@ void loop()
     // SEND DATA
     ////////////////////////////////////////////////////////
 
-    bool sendOk = broadcast_peer.send_message(
-        (uint8_t *)&outgoingData,
-        sizeof(outgoingData));
+    bool sendOk = true;
+    bool shouldSend = forceImmediateSend ||
+                      ((unsigned long)(millis() - lastSendTime) >= SEND_INTERVAL_MS);
+
+    if (shouldSend)
+    {
+
+        sendOk = broadcast_peer.send_message(
+            (uint8_t *)&outgoingData,
+            sizeof(outgoingData));
+        lastSendTime = millis();
+    }
 
     ////////////////////////////////////////////////////////
     // FULL DEBUG LOGGING
     ////////////////////////////////////////////////////////
 
-    if (ENABLE_LOGS)
+    if (ENABLE_LOGS && shouldSend)
     {
 
         Serial.println();
@@ -362,5 +393,5 @@ void loop()
         Serial.println("=======================================");
     }
 
-    delay(100);
+    delay(5);
 }
