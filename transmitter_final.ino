@@ -12,7 +12,6 @@
    ✓ Enable/Disable Logs Easily
    ✓ Joystick Movement
    ✓ Laser Toggle Button
-   ✓ Direction Detection
    ✓ Send Status Monitoring
 
    =====================================================
@@ -53,7 +52,6 @@ typedef struct struct_message
 
     int x;
     int y;
-    char direction[10];
     bool laserOn;
 
 } struct_message;
@@ -246,7 +244,7 @@ void loop()
     // Debounced read of laser button so LED doesn't stick or mis-read
     static bool prevLaserState = false;
     static int lastButtonRead = LOW;
-    static unsigned long lastDebounceTime = 0; 
+    static unsigned long lastDebounceTime = 0;
     const unsigned long debounceDelay = 50;
 
     int reading = digitalRead(LASER_BUTTON);
@@ -302,36 +300,6 @@ void loop()
     outgoingData.laserOn = laserState;
 
     ////////////////////////////////////////////////////////
-    // DIRECTION
-    ////////////////////////////////////////////////////////
-
-    if (mappedY > 50)
-    {
-
-        strcpy(outgoingData.direction, "up");
-    }
-    else if (mappedY < -50)
-    {
-
-        strcpy(outgoingData.direction, "down");
-    }
-    else if (mappedX > 50)
-    {
-
-        strcpy(outgoingData.direction, "right");
-    }
-    else if (mappedX < -50)
-    {
-
-        strcpy(outgoingData.direction, "left");
-    }
-    else
-    {
-
-        strcpy(outgoingData.direction, "stop");
-    }
-
-    ////////////////////////////////////////////////////////
     // SEND DATA
     ////////////////////////////////////////////////////////
 
@@ -366,9 +334,6 @@ void loop()
 
         Serial.print("RIGHT SPEED: ");
         Serial.println(rightSpeed);
-
-        Serial.print("DIRECTION: ");
-        Serial.println(outgoingData.direction);
 
         Serial.print("LASER: ");
 

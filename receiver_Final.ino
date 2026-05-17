@@ -104,7 +104,6 @@ typedef struct struct_message
 
     int x;
     int y;
-    char direction[10];
     bool laserOn;
 
 } struct_message;
@@ -370,36 +369,52 @@ void loop()
     int leftLDR = analogRead(LDR_LEFT);
     int rightLDR = analogRead(LDR_RIGHT);
 
-    if (hitDetected)
+    bool ldrTriggered = (leftLDR > LDR_THRESHOLD ||
+                         rightLDR > LDR_THRESHOLD);
+
+    if (ldrTriggered)
     {
 
-        if (leftLDR < LDR_THRESHOLD &&
-            rightLDR < LDR_THRESHOLD)
+        if (!hitDetected)
         {
 
-            if (hitClearSince == 0)
-            {
+            hitDetected = true;
 
-                hitClearSince = millis();
-            }
-            else if (millis() - hitClearSince > HIT_RECOVERY_DELAY)
-            {
-
-                hitDetected = false;
-                hitClearSince = 0;
-
-                myServo.write(0);
-
-                logMsg("");
-                logMsg("=======================================");
-                logMsg("[RECOVERED] HIT MODE CLEARED");
-                logMsg("=======================================");
-            }
+            logMsg("");
+            logMsg("=======================================");
+            logMsg("[HIT DETECTED]");
+            logMsg("[ACTION] STOPPING MOTORS");
+            logMsg("[ACTION] MOVING SERVO TO 90");
+            logMsg("=======================================");
         }
-        else
+
+        hitClearSince = 0;
+
+        // Enforce hit mode continuously while LDR stays above threshold.
+        stopMotors();
+        digitalWrite(LASER_PIN, LOW);
+        myServo.write(90);
+    }
+    else if (hitDetected)
+    {
+
+        if (hitClearSince == 0)
         {
 
+            hitClearSince = millis();
+        }
+        else if (millis() - hitClearSince > HIT_RECOVERY_DELAY)
+        {
+
+            hitDetected = false;
             hitClearSince = 0;
+
+            myServo.write(0);
+
+            logMsg("");
+            logMsg("=======================================");
+            logMsg("[RECOVERED] HIT MODE CLEARED");
+            logMsg("=======================================");
         }
     }
 
@@ -426,40 +441,6 @@ void loop()
 
             Serial.println("====================================");
         }
-    }
-
-    //////////////////////////////////////////////////////////
-    // HIT DETECTION
-    //////////////////////////////////////////////////////////
-
-    if (!hitDetected &&
-        (leftLDR > LDR_THRESHOLD ||
-         rightLDR > LDR_THRESHOLD))
-    {
-
-        hitDetected = true;
-        hitClearSince = 0;
-
-        logMsg("");
-        logMsg("=======================================");
-        logMsg("[HIT DETECTED]");
-        logMsg("[ACTION] STOPPING MOTORS");
-        logMsg("[ACTION] MOVING SERVO TO 90");
-        logMsg("=======================================");
-
-        ////////////////////////////////////////////////////////
-        // STOP EVERYTHING
-        ////////////////////////////////////////////////////////
-
-        stopMotors();
-
-        digitalWrite(LASER_PIN, LOW);
-
-        ////////////////////////////////////////////////////////
-        // MOVE SERVO
-        ////////////////////////////////////////////////////////
-
-        myServo.write(90);
     }
 
     delay(10);
@@ -532,9 +513,6 @@ void handleIncomingPacket(const uint8_t *incomingDataBytes,
 
         Serial.print("RIGHT SPEED: ");
         Serial.println(incomingData.y);
-
-        Serial.print("Direction: ");
-        Serial.println(incomingData.direction);
 
         Serial.print("Laser: ");
         Serial.println(incomingData.laserOn ? "ON" : "OFF");
