@@ -25,6 +25,9 @@ Commands (send via serial, end with newline)
 - `enable <name>` : enable a category (e.g. `enable ldr`)
 - `disable <name>` : disable a category
 - `toggle <name>` : toggle a category on/off
+- `servo <0-180>` : move receiver servo directly for testing
+- `servo sweep` : run servo sweep test (0 to 180 to 0)
+- `servohold on|off` : keep manual servo position or return to auto LDR control
 
 Examples
 
@@ -35,6 +38,12 @@ Examples
   - `enable all` or `set 0xFF`
 - Turn logs off:
   - `set 0` or `disable all`
+- Move servo to 90 degrees for testing:
+  - `servo 90`
+- Run a sweep and keep manual hold active:
+  - `servo sweep`
+- Resume automatic LDR-based servo control:
+  - `servohold off`
 
 Notes
 

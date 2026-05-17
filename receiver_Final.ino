@@ -47,6 +47,10 @@ enum LogCategory : uint8_t
 
 uint8_t logMask = 0; // default: disable all logs
 
+// Forward declaration so serial command handler can move servo for testing.
+extern Servo myServo;
+extern bool servoManualHold;
+
 void setLogMask(uint8_t mask)
 {
     logMask = mask;
@@ -132,7 +136,76 @@ void handleLogCommand(const String &cmdRaw)
         Serial.println("  enable <name>         - enable a category (ldr, packet, motor, servo, motorout, all)");
         Serial.println("  disable <name>        - disable a category");
         Serial.println("  toggle <name>         - toggle a category");
+        Serial.println("  servo <0-180>         - move servo directly for testing");
+        Serial.println("  servo sweep           - run servo sweep test 0->180->0");
+        Serial.println("  servohold on|off      - keep manual servo position / return to auto");
         Serial.println("  help                  - this message");
+        return;
+    }
+
+    if (verb == "servohold")
+    {
+        if (arg == "on")
+        {
+            servoManualHold = true;
+            Serial.println("[SERVO TEST] hold ON (auto LDR servo writes paused)");
+            return;
+        }
+
+        if (arg == "off")
+        {
+            servoManualHold = false;
+            Serial.println("[SERVO TEST] hold OFF (auto LDR servo writes resumed)");
+            return;
+        }
+
+        Serial.println("usage: servohold on|off");
+        return;
+    }
+
+    if (verb == "servo")
+    {
+        if (arg.length() == 0)
+        {
+            Serial.println("servo requires an angle: 0-180");
+            return;
+        }
+
+        if (arg == "sweep")
+        {
+            servoManualHold = true;
+
+            for (int pos = 0; pos <= 180; pos += 5)
+            {
+                myServo.write(pos);
+              //  delay(15);
+            }
+
+            for (int pos = 180; pos >= 0; pos -= 5)
+            {
+                myServo.write(pos);
+              //  delay(15);
+            }
+
+            Serial.println("[SERVO TEST] sweep complete (hold remains ON)");
+            return;
+        }
+
+        char *endPtr = nullptr;
+        long angle = strtol(arg.c_str(), &endPtr, 10);
+        if (endPtr == arg.c_str() || *endPtr != '\0')
+        {
+            Serial.println("invalid servo angle; use an integer 0-180");
+            return;
+        }
+
+        angle = constrain(angle, 0, 180);
+        servoManualHold = true;
+        myServo.write((int)angle);
+
+        Serial.print("[SERVO TEST] moved to ");
+        Serial.print((int)angle);
+        Serial.println(" deg (hold ON)");
         return;
     }
 
@@ -252,6 +325,9 @@ const int MAX_SPEED = 180;
 
 const int LDR_THRESHOLD = 4000;
 
+const int SERVO_MIN_US = 1000;
+const int SERVO_MAX_US = 2000;
+
 const unsigned long HIT_RECOVERY_DELAY = 1000;
 
 const unsigned long CONNECTION_TIMEOUT = 2000;
@@ -267,6 +343,8 @@ unsigned long lastPacketTime = 0;
 bool hitDetected = false;
 
 unsigned long hitClearSince = 0;
+
+bool servoManualHold = false;
 
 // Track whether motors are currently active (moving). Used to avoid
 // logging a STOP action immediately when a transmitter connects while
@@ -450,6 +528,8 @@ void setup()
     pinMode(LDR_LEFT, INPUT);
     pinMode(LDR_RIGHT, INPUT);
 
+    
+
     //////////////////////////////////////////////////////////
     // PWM
     //////////////////////////////////////////////////////////
@@ -457,16 +537,7 @@ void setup()
     ledcAttach(LEFT_PWM, PWM_FREQ, PWM_RESOLUTION);
     ledcAttach(RIGHT_PWM, PWM_FREQ, PWM_RESOLUTION);
 
-    //////////////////////////////////////////////////////////
-    // SERVO
-    //////////////////////////////////////////////////////////
-
-    myServo.setPeriodHertz(50);
-
-    myServo.attach(SERVO_PIN, 500, 2400);
-
-    // SERVO AT 0 DEGREE AT START
-    myServo.write(0);
+   
 
     logMsg("[SERVO] Initialized at 0 degree");
     if (ENABLE_LOGS && isLogEnabled(LOG_SERVO))
@@ -577,7 +648,6 @@ void loop()
 
         if (!hitDetected)
         {
-
             hitDetected = true;
 
             if (ENABLE_LOGS && (isLogEnabled(LOG_MOTOR) || isLogEnabled(LOG_SERVO)))
@@ -599,7 +669,10 @@ void loop()
         // Enforce hit mode continuously while LDR stays above threshold.
         stopMotors();
         digitalWrite(LASER_PIN, LOW);
-        myServo.write(90);
+        if (!servoManualHold)
+        {
+            myServo.write(90);
+        }
         if (ENABLE_LOGS && isLogEnabled(LOG_SERVO))
         {
             Serial.println("[SERVO] moved to 90 due to LDR trigger");
@@ -610,16 +683,17 @@ void loop()
 
         if (hitClearSince == 0)
         {
-
             hitClearSince = millis();
         }
         else if (millis() - hitClearSince > HIT_RECOVERY_DELAY)
         {
-
             hitDetected = false;
             hitClearSince = 0;
 
-            myServo.write(0);
+            if (!servoManualHold)
+            {
+                myServo.write(0);
+            }
 
             logMsg("");
             logMsg("=======================================");
@@ -656,7 +730,7 @@ void loop()
         }
     }
 
-    delay(10);
+   //delay(10);
 }
 
 ////////////////////////////////////////////////////////////

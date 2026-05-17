@@ -464,7 +464,7 @@ void loop()
         Serial.println("=========== JOYSTICK READINGS ===========");
         Serial.print("RAW X: ");
         Serial.println(rawX);
-        Serial.print("RAW Y: ");
+        Serial.print("RAW Y: ");2
         Serial.println(rawY);
         Serial.print("MAPPED X: ");
         Serial.println(mappedX);
@@ -570,5 +570,5 @@ void loop()
         }
     }
 
-    delay(5);
+ //   delay(5);
 }
