@@ -220,7 +220,7 @@ const int LASER_LED = 16;
 
 const unsigned long SEND_INTERVAL_MS = 20;
 const unsigned long LASER_DEBOUNCE_MS = 20;
-const int JOY_CALIBRATION_SAMPLES = 120;
+const int JOY_CALIBRATION_SAMPLES = 100;
 const unsigned long JOY_CALIBRATION_DELAY_MS = 5;
 
 //////////////////////////////////////////////////////////
@@ -381,15 +381,28 @@ void calibrateJoystickCenter()
 {
     long sumX = 0;
     long sumY = 0;
+    bool ledState = false;
 
     logCategory(LOG_SYSTEM, "[JOY] Calibrating joystick center...");
+
+    // Blink LED while center samples are being captured.
+    digitalWrite(LASER_LED, LOW);
 
     for (int i = 0; i < JOY_CALIBRATION_SAMPLES; i++)
     {
         sumX += analogRead(JOY_X);
         sumY += analogRead(JOY_Y);
+
+        if ((i % 5) == 0)
+        {
+            ledState = !ledState;
+            digitalWrite(LASER_LED, ledState ? HIGH : LOW);
+        }
+
         delay(JOY_CALIBRATION_DELAY_MS);
     }
+
+    digitalWrite(LASER_LED, LOW);
 
     JOY_X_CENTER_RAW = (int)(sumX / JOY_CALIBRATION_SAMPLES);
     JOY_Y_CENTER_RAW = (int)(sumY / JOY_CALIBRATION_SAMPLES);
