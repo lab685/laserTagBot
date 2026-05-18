@@ -21,7 +21,7 @@
 #include "ESP32_NOW.h"
 #include "WiFi.h"
 
-#define ESPNOW_WIFI_CHANNEL 4
+#define ESPNOW_WIFI_CHANNEL 1
 
 //////////////////////////////////////////////////////////
 // ENABLE / DISABLE LOGS

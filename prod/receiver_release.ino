@@ -192,7 +192,7 @@ void loop()
 
         stopMotors();
         digitalWrite(LASER_PIN, LOW);
-        myServo.write(90);
+        myServo.write(180);
     }
     else if (hitDetected)
     {

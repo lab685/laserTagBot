@@ -723,7 +723,7 @@ void loop()
         }
         if (!servoManualHold)
         {
-            myServo.write(90);
+            myServo.write(180);
         }
         if (ENABLE_LOGS && isLogEnabled(LOG_SERVO))
         {
