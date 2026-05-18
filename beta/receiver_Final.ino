@@ -572,6 +572,16 @@ void setup()
     // PWM
     //////////////////////////////////////////////////////////
 
+     // ✅ Allocate timers and attach servo FIRST, before ledcAttach
+    ESP32PWM::allocateTimer(0);
+    ESP32PWM::allocateTimer(1);
+    ESP32PWM::allocateTimer(2);
+    ESP32PWM::allocateTimer(3);
+
+    myServo.setPeriodHertz(50);
+    myServo.attach(SERVO_PIN, SERVO_MIN_US, SERVO_MAX_US);
+    myServo.write(0);
+
     ledcAttach(LEFT_PWM, PWM_FREQ, PWM_RESOLUTION);
     ledcAttach(RIGHT_PWM, PWM_FREQ, PWM_RESOLUTION);
 

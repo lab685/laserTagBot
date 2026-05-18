@@ -139,9 +139,6 @@ void setup()
     pinMode(LDR_LEFT, INPUT);
     pinMode(LDR_RIGHT, INPUT);
 
-    ledcAttach(LEFT_PWM, PWM_FREQ, PWM_RESOLUTION);
-    ledcAttach(RIGHT_PWM, PWM_FREQ, PWM_RESOLUTION);
-
     ESP32PWM::allocateTimer(0);
     ESP32PWM::allocateTimer(1);
     ESP32PWM::allocateTimer(2);
@@ -149,6 +146,9 @@ void setup()
     myServo.setPeriodHertz(50);
     myServo.attach(SERVO_PIN, SERVO_MIN_US, SERVO_MAX_US);
     myServo.write(0);
+
+    ledcAttach(LEFT_PWM, PWM_FREQ, PWM_RESOLUTION);
+    ledcAttach(RIGHT_PWM, PWM_FREQ, PWM_RESOLUTION);
 
     stopMotors();
 
