@@ -113,6 +113,10 @@ void printLogStatus()
     Serial.println(isLogEnabled(LOG_SERVO) ? "ON" : "OFF");
     Serial.print(" MOTOR_OUTPUT: ");
     Serial.println(isLogEnabled(LOG_MOTOR_OUTPUT) ? "ON" : "OFF");
+    Serial.print(" SERVO_HOLD: ");
+    Serial.println(servoManualHold ? "ON" : "OFF");
+    Serial.print(" LASER_CONTROL: ");
+    Serial.println(laserManualOverride ? "MANUAL" : "TRANSMITTER");
     Serial.println();
 }
 
@@ -138,9 +142,7 @@ void handleLogCommand(const String &cmdRaw)
         Serial.println("  set <hex|dec>         - set mask directly (e.g. set 0x1F)");
         Serial.println("  enable <name>         - enable a category (ldr, packet, motor, servo, motorout, all)");
         Serial.println("  disable <name>        - disable a category");
-        Serial.println("  toggle <name>         - toggle a category");
         Serial.println("  servo <0-180>         - move servo directly for testing");
-        Serial.println("  servo sweep           - run servo sweep test 0->180->0");
         Serial.println("  servohold on|off      - keep manual servo position / return to auto");
         Serial.println("  laser on|off|toggle   - force receiver laser for testing");
         Serial.println("  laser auto            - return laser control to transmitter");
@@ -209,27 +211,7 @@ void handleLogCommand(const String &cmdRaw)
             return;
         }
 
-        if (arg == "sweep")
-        {
-            servoManualHold = true;
-
-            for (int pos = 0; pos <= 180; pos += 5)
-            {
-                myServo.write(pos);
-                //  delay(15);
-            }
-
-            for (int pos = 180; pos >= 0; pos -= 5)
-            {
-                myServo.write(pos);
-                //  delay(15);
-            }
-
-            Serial.println("[SERVO TEST] sweep complete (hold remains ON)");
-            return;
-        }
-
-        char *endPtr = nullptr;
+                char *endPtr = nullptr;
         long angle = strtol(arg.c_str(), &endPtr, 10);
         if (endPtr == arg.c_str() || *endPtr != '\0')
         {
@@ -273,7 +255,7 @@ void handleLogCommand(const String &cmdRaw)
         return;
     }
 
-    if (verb == "enable" || verb == "disable" || verb == "toggle")
+    if (verb == "enable" || verb == "disable")
     {
         if (arg.length() == 0)
         {
@@ -294,26 +276,11 @@ void handleLogCommand(const String &cmdRaw)
             Serial.print("Enabled ");
             Serial.println(arg);
         }
-        else if (verb == "disable")
+        else // disable
         {
             disableLog(cat);
             Serial.print("Disabled ");
             Serial.println(arg);
-        }
-        else
-        {
-            if (isLogEnabled(cat))
-            {
-                disableLog(cat);
-                Serial.print("Toggled OFF ");
-                Serial.println(arg);
-            }
-            else
-            {
-                enableLog(cat);
-                Serial.print("Toggled ON ");
-                Serial.println(arg);
-            }
         }
 
         printLogStatus();
@@ -572,7 +539,7 @@ void setup()
     // PWM
     //////////////////////////////////////////////////////////
 
-     // ✅ Allocate timers and attach servo FIRST, before ledcAttach
+    // ✅ Allocate timers and attach servo FIRST, before ledcAttach
     ESP32PWM::allocateTimer(0);
     ESP32PWM::allocateTimer(1);
     ESP32PWM::allocateTimer(2);
@@ -723,39 +690,16 @@ void loop()
         }
         if (!servoManualHold)
         {
-            myServo.write(90);
+            myServo.write(180);
         }
         if (ENABLE_LOGS && isLogEnabled(LOG_SERVO))
         {
-            Serial.println("[SERVO] moved to 90 due to LDR trigger");
+            Serial.println("[SERVO] moved to 180 due to LDR trigger");
         }
     }
-    else if (hitDetected)
-    {
-
-        if (hitClearSince == 0)
-        {
-            hitClearSince = millis();
-        }
-        else if (millis() - hitClearSince > HIT_RECOVERY_DELAY)
-        {
-            hitDetected = false;
-            hitClearSince = 0;
-
-            if (!servoManualHold)
-            {
-                myServo.write(0);
-            }
-
-            logMsg("");
-            logMsg("=======================================");
-            if (ENABLE_LOGS && isLogEnabled(LOG_SERVO))
-            {
-                Serial.println("[RECOVERED] HIT MODE CLEARED");
-            }
-            logMsg("=======================================");
-        }
-    }
+    // HIT LATCH: once `hitDetected` is set we do NOT clear it here.
+    // The system remains stopped, laser off, and servo held at 180
+    // until the device is restarted. No auto-recovery performed.
 
     //////////////////////////////////////////////////////////
     // LOG LDR VALUES

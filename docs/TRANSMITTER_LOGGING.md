@@ -42,3 +42,8 @@ Notes
 - Changes take effect immediately.
 - `show` prints the current mask and which categories are ON/OFF.
 - Use the `help` command from the serial monitor for the quick reference.
+
+Throttle curve
+
+- The transmitter and prod transmitter apply a non-linear throttle curve by default to make the vehicle less twitchy near the joystick center and more responsive toward the extremes.
+- Tuning: change the `expo` constant in `applyJoystickCurve()` (in `transmitter_final.ino` or `transmitter_release.ino`) — larger values (closer to `1.0`) make the center softer; smaller values (closer to `0.0`) make it more linear/aggressive.

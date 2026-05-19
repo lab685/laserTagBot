@@ -187,26 +187,14 @@ void loop()
 
     if (ldrTriggered)
     {
+        // Latch hit state permanently until restart
         hitDetected = true;
-        hitClearSince = 0;
 
         stopMotors();
         digitalWrite(LASER_PIN, LOW);
-        myServo.write(90);
+        myServo.write(180);
     }
-    else if (hitDetected)
-    {
-        if (hitClearSince == 0)
-        {
-            hitClearSince = millis();
-        }
-        else if (millis() - hitClearSince > HIT_RECOVERY_DELAY)
-        {
-            hitDetected = false;
-            hitClearSince = 0;
-            myServo.write(0);
-        }
-    }
+    // else: when latched there is no auto-recovery; system remains stopped
 }
 
 void handleIncomingPacket(const uint8_t *incomingDataBytes,

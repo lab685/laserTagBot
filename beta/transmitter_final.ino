@@ -366,6 +366,24 @@ int mapAxisWithDeadzone(int rawValue, int centerValue, int deadzoneValue)
     return map(rawValue, upperBound, 4095, 0, -255);
 }
 
+int applyJoystickCurve(int value)
+{
+
+    if (value == 0)
+    {
+
+        return 0;
+    }
+
+    const float expo = 0.65f;
+    float normalized = (float)abs(value) / 255.0f;
+    float curved = (expo * normalized * normalized * normalized) +
+                   ((1.0f - expo) * normalized);
+    int output = (int)(curved * 255.0f + 0.5f);
+
+    return value > 0 ? output : -output;
+}
+
 void blinkCalibrationPattern()
 {
     for (int i = 0; i < 3; i++)
@@ -588,8 +606,11 @@ void loop()
     }
 
     ////////////////////////////////////////////////////////
-    // FILL STRUCT
+    // APPLY CURVE TO INDIVIDUAL AXES, THEN MIX
     ////////////////////////////////////////////////////////
+
+    mappedX = applyJoystickCurve(mappedX);
+    mappedY = applyJoystickCurve(mappedY);
 
     int leftSpeed = mappedY + mappedX;
     int rightSpeed = mappedY - mappedX;
@@ -638,5 +659,5 @@ void loop()
         }
     }
 
- //   delay(5);
+    //   delay(5);
 }
