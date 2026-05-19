@@ -113,6 +113,20 @@ void blinkCalibrationDonePattern()
     }
 }
 
+int applyJoystickCurve(int value)
+{
+    if (value == 0)
+        return 0;
+
+    const float expo = 0.65f;
+    float normalized = (float)abs(value) / 255.0f;
+    float curved = (expo * normalized * normalized * normalized) +
+                   ((1.0f - expo) * normalized);
+    int output = (int)(curved * 255.0f + 0.5f);
+
+    return value > 0 ? output : -output;
+}
+
 void calibrateJoystickCenter()
 {
     long sumX = 0;
@@ -209,6 +223,10 @@ void loop()
             }
         }
     }
+
+    // apply same non-linear response curve to each axis before mixing
+    mappedX = applyJoystickCurve(mappedX);
+    mappedY = applyJoystickCurve(mappedY);
 
     int leftSpeed = mappedY + mappedX;
     int rightSpeed = mappedY - mappedX;
