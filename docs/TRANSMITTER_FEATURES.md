@@ -27,3 +27,11 @@ Notes
 
 - If you change the curve in the transmitter, be sure to test steering both forward and backward — the per-axis curve (applied before mixing) avoids backward/forward asymmetry.
 - Calibration and deadzone values may need to be adjusted for different joystick hardware.
+
+Schematics
+
+Below is a placeholder schematic image for the transmitter. Replace the SVG file in `docs/images/` with the full-resolution schematic PNG/PDF when available.
+
+![Transmitter schematic](images/transmitter_schematic.png)
+
+Circuit diagram link (placeholder): [Transmitter circuit diagram](https://app.cirkitdesigner.com/project/25983b15-9bd0-45e7-839f-15525948b9f8)

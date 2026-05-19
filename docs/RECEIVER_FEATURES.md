@@ -32,3 +32,11 @@ Which sketch to use
 Contact
 
 If you need help adjusting servo timings, LDR thresholds, or motor `MAX_SPEED`, open an issue or ask for a tuning session.
+
+Schematics
+
+Below is a placeholder schematic image for the receiver.
+
+![Receiver schematic](images/receiver_schematic.pmg)
+
+Circuit diagram link (placeholder): [Receiver circuit diagram](https://app.cirkitdesigner.com/project/0004e2bf-ef1f-424e-ad21-442a3b71bbf9)
