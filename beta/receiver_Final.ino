@@ -53,6 +53,7 @@ extern bool servoManualHold;
 extern bool laserManualOverride;
 extern bool laserManualState;
 extern const int LASER_PIN;
+extern bool motorsActive;
 
 void setLogMask(uint8_t mask)
 {
@@ -146,7 +147,87 @@ void handleLogCommand(const String &cmdRaw)
         Serial.println("  servohold on|off      - keep manual servo position / return to auto");
         Serial.println("  laser on|off|toggle   - force receiver laser for testing");
         Serial.println("  laser auto            - return laser control to transmitter");
+        Serial.println("  motor forward [spd]   - drive both motors forward");
+        Serial.println("  motor back [spd]      - drive both motors backward");
+        Serial.println("  motor left [spd]      - rotate left in place");
+        Serial.println("  motor right [spd]     - rotate right in place");
+        Serial.println("  motor stop            - stop all motors");
         Serial.println("  help                  - this message");
+        return;
+    }
+
+    if (verb == "motor")
+    {
+        int sp = 120;
+
+        if (arg.length() > 0)
+        {
+            int spaceIndex = arg.indexOf(' ');
+            String action = (spaceIndex == -1) ? arg : arg.substring(0, spaceIndex);
+            String speedText = (spaceIndex == -1) ? String("") : arg.substring(spaceIndex + 1);
+            action.toLowerCase();
+            speedText.trim();
+
+            if (speedText.length() > 0)
+            {
+                char *endPtr = nullptr;
+                long parsed = strtol(speedText.c_str(), &endPtr, 10);
+                if (endPtr != speedText.c_str() && *endPtr == '\0')
+                {
+                    sp = constrain((int)parsed, 0, 255);
+                }
+                else
+                {
+                    Serial.println("invalid speed; use an integer from 0 to 255");
+                    return;
+                }
+            }
+
+            if (action == "forward" || action == "f")
+            {
+                moveForward(sp, sp);
+                motorsActive = true;
+                Serial.print("[MOTOR TEST] forward @ ");
+                Serial.println(sp);
+                return;
+            }
+
+            if (action == "back" || action == "backward" || action == "reverse" || action == "b")
+            {
+                moveBackward(sp, sp);
+                motorsActive = true;
+                Serial.print("[MOTOR TEST] backward @ ");
+                Serial.println(sp);
+                return;
+            }
+
+            if (action == "left" || action == "l")
+            {
+                turnLeft(sp);
+                motorsActive = true;
+                Serial.print("[MOTOR TEST] left rotate @ ");
+                Serial.println(sp);
+                return;
+            }
+
+            if (action == "right" || action == "r")
+            {
+                turnRight(sp);
+                motorsActive = true;
+                Serial.print("[MOTOR TEST] right rotate @ ");
+                Serial.println(sp);
+                return;
+            }
+
+            if (action == "stop" || action == "s")
+            {
+                stopMotors();
+                Serial.println("[MOTOR TEST] stopped");
+                return;
+            }
+        }
+
+        Serial.println("usage: motor forward|back|left|right|stop [0-255]");
         return;
     }
 
@@ -211,7 +292,7 @@ void handleLogCommand(const String &cmdRaw)
             return;
         }
 
-                char *endPtr = nullptr;
+        char *endPtr = nullptr;
         long angle = strtol(arg.c_str(), &endPtr, 10);
         if (endPtr == arg.c_str() || *endPtr != '\0')
         {
